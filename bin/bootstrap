@@ -1,0 +1,199 @@
+#!/usr/bin/env python
+from enum import Enum
+from os import makedirs, chmod
+from os.path import exists
+from sys import exit
+from typing import NamedTuple, Optional
+import re
+import subprocess as sp
+
+
+CHROOT_PATH = '/mnt'
+BOOT_DIR_PATH = f'{CHROOT_PATH}/boot'
+SWAPFILE_PATH = f'{CHROOT_PATH}/swapfile'
+
+BASE_PACKAGES = {
+    'base',
+    'linux-lts',
+    'linux-firmware',
+    'python',
+    'archlinux-keyring',
+    'reflector',
+    'sudo',
+    'efibootmgr',
+    'grub',
+}
+
+PROMPT_INSTALL_CONFIRM = """
+This install script assumes this computer boots with UEFI and is connected to the Internet through DHCP.
+Any other type of configuration is not supported.
+Confirm installation? (y/n)
+=> """
+
+PROMPT_INSTALL_DISK = """
+Which disk should Arch be installed to? (CAUTION: the disk will be completely erased!)
+=> """
+
+PROMPT_PROCESSOR_BRAND = """
+What is the brand of your CPU? ({brands})
+=> """
+
+
+class PartitionMap(NamedTuple):
+    boot: str
+    root: str
+
+
+class ProcessorBrand(Enum):
+    AMD = 'amd'
+    INTEL = 'intel'
+
+
+def _exec(cmd: str, *, capture_output: bool = False) -> sp.CompletedProcess:
+    capture_args = {'stdout': sp.PIPE} if capture_output else {}
+
+    return sp.run(cmd.split(), check=True, text=True, stderr=sp.STDOUT, **capture_args)
+
+
+def _disk_is_valid(disk: str) -> bool:
+    return bool(disk) and re.search('^/dev/[a-z\d]+$', disk) and exists(disk)
+
+
+def _get_total_memory() -> int:
+    free_output = _exec('free --bytes', capture_output=True).stdout
+
+    return int(re.search('^Mem: +(?P<bytes>\d+) ', free_output, flags=re.M).group('bytes'))
+
+
+def confirm_installation() -> None:
+    response = None
+
+    while response not in {'Y', 'y', 'N', 'n'}:
+        response = input(PROMPT_INSTALL_CONFIRM)
+
+    if response in {'N', 'n'}:
+        exit(1)
+
+
+def stop_reflector() -> None:
+    print('\nStopping Reflector service...')
+    _exec('systemctl stop reflector')
+
+
+def enable_ntp() -> None:
+    print('\nActivating NTP time synchronization...')
+    _exec('timedatectl set-ntp 1')
+
+
+def list_disks() -> None:
+    print()
+    _exec('fdisk --list')
+
+
+def select_install_disk() -> str:
+    disk = None
+
+    while not _disk_is_valid(disk):
+        list_disks()
+        disk = input(PROMPT_INSTALL_DISK)
+
+    return disk
+
+
+def wipe_disk(disk: str) -> None:
+    print(f'\nWiping disk {disk}...')
+    _exec(f'wipefs --all {disk}')
+
+
+def partition_disk(disk: str) -> PartitionMap:
+    print(f'\nPartitioning disk {disk}...')
+    _exec(f'parted {disk} mklabel gpt')
+    _exec(f'parted {disk} mkpart uefi_boot fat32 1MiB 321MiB')
+    _exec(f'parted {disk} mkpart root ext4 321MiB 100%')
+    _exec(f'parted {disk} set 1 esp on')
+
+    return PartitionMap(boot=f'{disk}1', root=f'{disk}2')
+
+
+def format_partitions(partitions: PartitionMap) -> None:
+    print('\nFormatting partitions...')
+    _exec(f'mkfs.fat -F 32 {partitions.boot}')
+    _exec(f'mkfs.ext4 {partitions.root}')
+
+
+def mount_partitions(partitions: PartitionMap) -> None:
+    print('\nMounting partitions...')
+    _exec(f'mount --options noatime {partitions.root} {CHROOT_PATH}')
+    makedirs(BOOT_DIR_PATH, mode=0o755, exist_ok=True)
+    _exec(f'mount --options noatime {partitions.boot} {BOOT_DIR_PATH}')
+
+
+def create_swapfile(size_in_bytes: int) -> None:
+    print('\nCreating swapfile...')
+    _exec(f'fallocate --length {size_in_bytes} {SWAPFILE_PATH}')
+    chmod(SWAPFILE_PATH, 0o600)
+    _exec(f'mkswap {SWAPFILE_PATH}')
+
+
+def enable_swap() -> None:
+    print('\nEnabling swap...')
+    _exec(f'swapon {SWAPFILE_PATH}')
+
+
+def update_mirror_list() -> None:
+    print('\nUpdating mirror list...')
+    _exec('reflector --verbose --latest 10 --sort rate --protocol https --save /etc/pacman.d/mirrorlist')
+
+
+def select_processor_brand() -> Optional[ProcessorBrand]:
+    proc_brands = {
+        **{member.value: member for member in ProcessorBrand},
+        'other': None
+    }
+    choices = proc_brands.keys()
+    proc_brand = None
+
+    while proc_brand not in choices:
+        proc_brand = input(PROMPT_PROCESSOR_BRAND.format(brands=', '.join(choices)))
+
+    return proc_brands[proc_brand]
+
+
+def install_base_system(processor_brand: Optional[ProcessorBrand]) -> None:
+    packages = BASE_PACKAGES.copy()
+
+    if processor_brand is not None:
+        packages.add(f'{processor_brand.value}-ucode')
+
+    print('\nInstalling base system...')
+    _exec(f'pacstrap -G {CHROOT_PATH} {" ".join(packages)}')
+
+
+def generate_fstab() -> None:
+    fstab = _exec(f'genfstab -U {CHROOT_PATH}', capture_output=True).stdout
+
+    for pattern in {'\t+', ' {2,}'}:
+        fstab = re.sub(pattern, ' ', fstab, flags=re.M)
+
+    with open(f'{CHROOT_PATH}/etc/fstab', mode='w') as fstab_file:
+        print('\nGenerating fstab...')
+        print(fstab, file=fstab_file)
+
+
+def main() -> None:
+    confirm_installation()
+    stop_reflector()
+    enable_ntp()
+    install_disk = select_install_disk()
+    wipe_disk(install_disk)
+    partitions = partition_disk(install_disk)
+    format_partitions(partitions)
+    mount_partitions(partitions)
+    create_swapfile(_get_total_memory())
+    enable_swap()
+    update_mirror_list()
+    install_base_system(select_processor_brand())
+    generate_fstab()
+
+
+main()
