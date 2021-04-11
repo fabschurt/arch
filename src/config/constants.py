@@ -1,0 +1,3 @@
+CHROOT_PATH = '/mnt'
+BOOT_DIR_PATH = f'{CHROOT_PATH}/boot'
+SWAPFILE_PATH = f'{CHROOT_PATH}/swapfile'

@@ -17,6 +17,8 @@ SYSTEM_TIMEZONE = 'Europe/Paris'
 
 CONSOLE_KEYMAP = 'fr-latin9'
 
+ADMIN_USER_ID = 1000
+
 CONF_LOCALES = """
 LANG=en_US.UTF-8
 LANGUAGE=en_US:en
@@ -26,6 +28,12 @@ CONF_HOSTS = """
 127.0.0.1 localhost
 ::1 localhost
 127.0.1.1 {hostname}.localdomain {hostname}
+"""
+
+CONF_GRUB = """
+[GRUB_TIMEOUT]=3
+[GRUB_CMDLINE_LINUX_DEFAULT]="text"
+[GRUB_GFXMODE]=1024x768x32,1024x768,auto
 """
 
 PROMPT_HOSTNAME = """
@@ -56,15 +64,15 @@ def _exec(cmd: str, *, capture_output: bool = False) -> sp.CompletedProcess:
     return sp.run(cmd.split(), check=True, text=True, stderr=sp.STDOUT, **capture_args)
 
 
-def _search_in_file(file_path: str, search_pattern: str) -> Optional[re.Match]:
-    with FileInput(file_path) as file:
-        for line in file:
-            match = re.search(search_pattern, line)
-
-            if match is not None:
-                return match
-
-    return None
+#def _search_in_file(file_path: str, search_pattern: str) -> Optional[re.Match]:
+#    with FileInput(file_path) as file:
+#        for line in file:
+#            match = re.search(search_pattern, line)
+#
+#            if match is not None:
+#                return match
+#
+#    return None
 
 
 def _write_to_file(file_path: str, content: str) -> None:
@@ -91,8 +99,10 @@ def _username_is_valid(name: str) -> bool:
     return bool(name) and re.search(r'^\w+$', name, re.A)
 
 
-def _user_exists(name: str) -> bool:
-    return bool(_search_in_file('/etc/passwd', r'^{name}:'.format(name=re.escape(name))))
+def _user_exists(id: int) -> bool:
+    id_output = _exec(f'id {id}', capture_output=True).stdout
+
+    return not id_output.endswith(': no such user')
 
 
 def select_hostname() -> str:
@@ -121,12 +131,12 @@ def gather_install_parameters():
 
 
 def create_admin_user(name: str) -> None:
-    if _user_exists(name):
+    if _user_exists(ADMIN_USER_ID):
         return
 
     print('\nCreating admin user...')
 
-    _exec(f'useradd --uid 1000 --groups wheel,sys --create-home {name}')
+    _exec(f'useradd --uid {ADMIN_USER_ID} --groups wheel,sys --create-home {name}')
     print(PROMPT_ADMIN_PASSWORD)
     _exec(f'passwd {name}')
 
@@ -183,6 +193,15 @@ def configure_hosts(hostname: str) -> str:
     _write_to_file('/etc/hosts', CONF_HOSTS.format(hostname=hostname))
 
 
+def configure_grub() -> None:
+    #sed --in-place --regexp-extended "s/^${option}=.*\$/${option}=${GRUB_OPTIONS[$option]}/" /etc/default/grub
+
+
+def install_grub() -> None:
+    command('grub-install --target=x86_64-efi --bootloader-id=GRUB --efi-directory=/boot')
+    command('grub-mkconfig --output=/boot/grub/grub.cfg')
+
+
 def cleanup() -> None:
     print('\nCleaning up...')
 
@@ -205,8 +224,13 @@ def main() -> None:
     configure_keyboard()
 
     configure_hosts(install_params.hostname)
+    #configure_network_ifaces()
+
+    #configure_grub()
+    #install_grub()
 
     cleanup()
 
 
-main()
+if __name__ == '__main__':
+    main()
