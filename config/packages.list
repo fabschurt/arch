@@ -43,6 +43,7 @@ imagemagick
 intel-media-driver
 iproute2
 iputils
+jpegoptim
 jq
 less
 libsmbios
@@ -73,6 +74,7 @@ perl
 perl-term-readline-gnu
 perl-unicode-linebreak
 php
+pngcrush
 poppler
 procps-ng
 pulseaudio-modules-bt
