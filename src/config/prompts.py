@@ -1,5 +1,8 @@
 INSTALL_CONFIRM = """
-This install script assumes this computer boots with UEFI and is connected to the Internet through DHCP.
+This install script assumes the following characteristics for the target system:
+  * UEFI boot (without Secure Boot)
+  * Intel CPU and integrated GPU
+  * wired Internet connection (with DHCP)
 Any other type of configuration is not supported.
 Confirm installation? (y/n)
 => """

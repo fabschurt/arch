@@ -177,12 +177,14 @@ def configure_locales() -> None:
         )
 
     _exec('locale-gen')
+    # TODO: Use localectl here instead of editing the file manually
     _write_to_file('/etc/locale.conf', CONF_LOCALES)
 
 
 def configure_keyboard() -> None:
     print('\nConfiguring keyboard...')
 
+    # TODO: Use localectl here instead of editing the file manually
     _write_to_file('/etc/vconsole.conf', f'KEYMAP={CONSOLE_KEYMAP}')
 
 
