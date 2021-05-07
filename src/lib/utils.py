@@ -1,6 +1,5 @@
 import re
-import subprocess as proc
-
+import subprocess as sp
 from fileinput import FileInput
 from sys import exit
 from typing import Optional
@@ -10,10 +9,10 @@ def handle_sigint(signal: int, frame: Optional[object]):
     exit(1)
 
 
-def command(cmd: str, *, capture_output: bool = False) -> proc.CompletedProcess:
-    capture_args = {'stdout': proc.PIPE} if capture_output else {}
+def run(cmd: str, *, capture_output: bool = False) -> sp.CompletedProcess:
+    capture_args = {'stdout': sp.PIPE} if capture_output else {}
 
-    return proc.run(cmd.split(), check=True, text=True, stderr=proc.STDOUT, **capture_args)
+    return sp.run(cmd.split(), check=True, text=True, stderr=sp.STDOUT, **capture_args)
 
 
 def write_to_file(file_path: str, content: str) -> None:

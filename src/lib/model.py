@@ -1,8 +1,19 @@
 import re
-
 from dataclasses import dataclass
 from enum import Enum
 from typing import NamedTuple, Optional
+
+
+@dataclass(frozen=True)
+class ByteCount:
+    amount: int
+
+    def __post_init__(self) -> None:
+        if self.amount <= 0:
+            raise ValueError('Byte count must be a positive integer.')
+
+    def __int__(self) -> int:
+        return self.amount
 
 
 @dataclass(frozen=True)
@@ -33,7 +44,8 @@ class Partition:
         return self.path
 
 
-class PartitionMap(NamedTuple):
+@dataclass(frozen=True)
+class PartitionMap:
     boot: Partition
     root: Partition
 
@@ -47,18 +59,7 @@ class ProcessorBrand(Enum):
 
 
 @dataclass(frozen=True)
-class ByteCount:
-    amount: int
-
-    def __post_init__(self) -> None:
-        if self.amount <= 0:
-            raise ValueError('Byte count must be a positive integer.')
-
-    def __int__(self) -> int:
-        return self.amount
-
-
-class BootstrapParameters(NamedTuple):
+class BootstrapParameters:
     install_disk: Disk
     processor_brand: Optional[ProcessorBrand]
     total_memory: ByteCount
