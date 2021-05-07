@@ -5,21 +5,21 @@ from signal import SIGINT, signal
 from sys import exit
 from typing import Optional
 
-from src.lib.utils import handle_sigint, command, write_to_file
+from src.lib.utils import handle_sigint, run, write_to_file
 from src.lib.model import Disk, PartitionMap, ProcessorBrand, ByteCount, BootstrapParameters
-import src.config.constants as c
-import src.config.prompts as p
+import src.config.paths
+import src.config.prompts
 
 
 def _get_available_disks() -> set[str]:
-    fdisk_output = command('fdisk --list', capture_output=True).stdout
+    fdisk_output = run('fdisk --list', capture_output=True).stdout
     disks = re.findall(f'^Disk ({Disk.PATH_PATTERN}):', fdisk_output, re.M)
 
     return {disk for disk in disks if not re.search(r'^/dev/loop\d+$', disk)}
 
 
 def _get_total_memory() -> ByteCount:
-    free_output = command('free --bytes', capture_output=True).stdout
+    free_output = run('free --bytes', capture_output=True).stdout
     match = re.search(r'^Mem: +(?P<bytes>\d+) ', free_output, flags=re.M)
 
     return ByteCount(amount=int(match.group('bytes')))
@@ -29,7 +29,7 @@ def confirm_installation() -> None:
     response = None
 
     while response not in {'Y', 'y', 'N', 'n'}:
-        response = input(p.INSTALL_CONFIRM)
+        response = input(prompts.INSTALL_CONFIRM)
 
     if response in {'N', 'n'}:
         exit(1)
@@ -38,7 +38,7 @@ def confirm_installation() -> None:
 def select_install_disk() -> Disk:
     disk_choices = _get_available_disks()
     install_disk = None
-    prompt = p.INSTALL_DISK.format(choices='\n'.join([f' -> {disk}' for disk in disk_choices]))
+    prompt = prompts.INSTALL_DISK.format(choices='\n'.join([f' -> {disk}' for disk in disk_choices]))
 
     while install_disk not in disk_choices:
         install_disk = input(prompt)
@@ -53,7 +53,7 @@ def select_processor_brand() -> Optional[ProcessorBrand]:
     }
     proc_choices = proc_brands.keys()
     proc_brand = None
-    prompt = p.PROCESSOR_BRAND.format(choices=', '.join(proc_choices))
+    prompt = prompts.PROCESSOR_BRAND.format(choices=', '.join(proc_choices))
 
     while proc_brand not in proc_choices:
         proc_brand = input(prompt)
@@ -72,28 +72,28 @@ def gather_install_parameters() -> BootstrapParameters:
 def stop_reflector() -> None:
     print('\nStopping Reflector service...')
 
-    command('systemctl stop reflector')
+    run('systemctl stop reflector')
 
 
 def enable_ntp() -> None:
     print('\nActivating NTP time synchronization...')
 
-    command('timedatectl set-ntp 1')
+    run('timedatectl set-ntp 1')
 
 
 def wipe_disk(disk: Disk) -> None:
     print(f'\nWiping disk {disk}...')
 
-    command(f'wipefs --all {disk}')
+    run(f'wipefs --all {disk}')
 
 
 def partition_disk(disk: Disk) -> PartitionMap:
     print(f'\nPartitioning disk {disk}...')
 
-    command(f'parted {disk} mklabel gpt')
-    command(f'parted {disk} mkpart uefi_boot fat32 1MiB 321MiB')
-    command(f'parted {disk} mkpart root ext4 321MiB 100%')
-    command(f'parted {disk} set 1 esp on')
+    run(f'parted {disk} mklabel gpt')
+    run(f'parted {disk} mkpart uefi_boot fat32 1MiB 385MiB')
+    run(f'parted {disk} mkpart root ext4 385MiB 100%')
+    run(f'parted {disk} set 1 esp on')
 
     return PartitionMap(
         boot=Partition(f'{disk}1'),
@@ -104,43 +104,43 @@ def partition_disk(disk: Disk) -> PartitionMap:
 def format_partitions(partitions: PartitionMap) -> None:
     print('\nFormatting partitions...')
 
-    command(f'mkfs.fat -F 32 {partitions.boot}')
-    command(f'mkfs.ext4 {partitions.root}')
+    run(f'mkfs.fat -F 32 {partitions.boot}')
+    run(f'mkfs.ext4 {partitions.root}')
 
 
 def mount_partitions(partitions: PartitionMap) -> None:
     print('\nMounting partitions...')
 
-    command(f'mount --options noatime {partitions.root} {c.CHROOT_PATH}')
-    makedirs(c.BOOT_DIR_PATH, mode=0o755, exist_ok=True)
-    command(f'mount --options noatime {partitions.boot} {c.BOOT_DIR_PATH}')
+    run(f'mount --options noatime {partitions.root} {paths.CHROOT_PATH}')
+    makedirs(paths.BOOT_DIR_PATH, mode=0o755, exist_ok=True)
+    run(f'mount --options noatime {partitions.boot} {paths.BOOT_DIR_PATH}')
 
 
 def create_swapfile(size: ByteCount) -> None:
     print('\nCreating swapfile...')
 
-    command(f'fallocate --length {int(size)} {c.SWAPFILE_PATH}')
-    chmod(c.SWAPFILE_PATH, 0o600)
-    command(f'mkswap {c.SWAPFILE_PATH}')
+    run(f'fallocate --length {int(size)} {paths.SWAPFILE_PATH}')
+    chmod(paths.SWAPFILE_PATH, 0o600)
+    run(f'mkswap {paths.SWAPFILE_PATH}')
 
 
 def enable_swap() -> None:
     print('\nEnabling swap...')
 
-    command(f'swapon {c.SWAPFILE_PATH}')
+    run(f'swapon {paths.SWAPFILE_PATH}')
 
 
 def update_mirror_list() -> None:
     print('\nUpdating mirror list...')
 
-    command('reflector --verbose --protocol https --country France --latest 10 --sort rate --save /etc/pacman.d/mirrorlist')
+    run('reflector --verbose --protocol https --country France --latest 10 --sort rate --save /etc/pacman.d/mirrorlist')
 
 
 def init_pacman_keyring() -> None:
     print('\nInitializing pacman keyring...')
 
-    command('pacman-key --init')
-    command('pacman-key --populate archlinux')
+    run('pacman-key --init')
+    run('pacman-key --populate archlinux')
 
 
 def install_base_system(processor_brand: Optional[ProcessorBrand]) -> None:
@@ -151,18 +151,18 @@ def install_base_system(processor_brand: Optional[ProcessorBrand]) -> None:
     if processor_brand is not None:
         base_packages.add(f'{processor_brand}-ucode')
 
-    command(f'pacstrap {c.CHROOT_PATH} {" ".join(base_packages)}')
+    run(f'pacstrap {paths.CHROOT_PATH} {" ".join(base_packages)}')
 
 
 def generate_fstab() -> None:
     print('\nGenerating fstab...')
 
-    fstab = command(f'genfstab -U {c.CHROOT_PATH}', capture_output=True).stdout
+    fstab = run(f'genfstab -U {paths.CHROOT_PATH}', capture_output=True).stdout
 
     for pattern in {r'\t+', ' {2,}'}:
         fstab = re.sub(pattern, ' ', fstab, flags=re.M)
 
-    write_to_file(f'{c.CHROOT_PATH}/etc/fstab', fstab)
+    write_to_file(f'{paths.CHROOT_PATH}/etc/fstab', fstab)
 
 
 def main() -> None:

@@ -1,12 +1,11 @@
 BASE_PACKAGES = {
     'base',
-    'linux-lts',
-    'linux-firmware',
-    'archlinux-keyring',
-    'reflector',
+    'curl',
     'efibootmgr',
     'grub',
-    'sudo',
-    'curl',
+    'linux-firmware',
+    'linux-lts',
     'python',
+    'reflector',
+    'sudo',
 }
